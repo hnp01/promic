@@ -1,0 +1,103 @@
+---
+title: "PBLQC_Silver_20220526"
+author: "Hao Pham"
+output: pdf_document
+date: Sys.Date()
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Peaks Intensity
+
+Based on the 2nd PBLQC run, SciexOS was used to extract the peak height of 16 transitions. The highest intensity within a peptide group was evaluated against the intensity threshold. 
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+## the input file is exported from SciexOS. 
+## this exported file contains parameters as specified by the settings file in Haos folder
+
+library(tidyverse)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(scales)
+
+#users need to include the appropriate directory and file name here
+input_file <- "C:/Users/phamh2/Documents/R/Examples/C220503.txt"
+
+data = read_delim(input_file, "\t", na="N/A")
+
+df_1 = data.frame("ISP" = c(1:8),
+                  `Component_Group_Name` = c("QSELSAK","ATEEQLK","WVGYGQDSR","FSVVYAK","IDPNAWVER","Gonadtrophin","GDFQFNISR","APVLFFDR"),
+                  "Intensity_Threshold" = c(3.0e5,2.0e5,4.0e5,8.0e5,6.0e4,1.0e5,3.0e4,8.0e5 ))
+df_2 = data %>%
+  filter(grepl("PBLQC_.*_2", `Sample Name`)) %>%
+  group_by(`Component Group Name`)%>%
+  summarise(Peak_Intensity = max(`Height`)) %>%
+  rename(`Component_Group_Name`=`Component Group Name`)
+
+intensity = left_join(df_1,df_2,by="Component_Group_Name")
+
+intensity$`Criteria_Met?`= ifelse(intensity$Intensity_Threshold < intensity$Peak_Intensity, "Yes", "No")
+
+kable(intensity)
+
+```
+
+## Analysis of Retention Time, Area and Peak Width at Half Height
+
+The 5 latest total ion chromatogram were integrated in SciexOS and data was exported to determine the average, standard deviation and percentage of coefficient of variation of the peaks parameters. Each transition (16 reported transitions) is reported separately. 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+#data table
+data_1 = data %>% 
+  filter(!grepl("PBLQC_.*_1", `Sample Name`)) %>%
+  group_by(`Component Name`)  %>%
+  summarise(Ave.RT = round(mean(`Retention Time`),2), STD.RT= round(sd(`Retention Time`),2), percentCV.RT =  round(STD.RT*100/Ave.RT,2),
+            Ave.PWHH = round(mean(`Width at 50%`),2), STD.PWHH= round(sd(`Width at 50%`),2), percentCV.PWHH = round(STD.PWHH*100/Ave.PWHH,2),
+            Ave.Area = round(mean(`Area`),2), STD.Area= round(sd(`Area`),2), percentCV.Area = round(STD.Area*100/Ave.Area,2))
+
+kable(data_1)
+
+#plot
+# use percentCV, no error bar
+RT_bar= ggplot(data_1, aes(x = percentCV.RT, y = `Component Name`))+
+  geom_bar(colour="gray", fill="gray", width=.8, stat = "identity") +
+  ggtitle("CV% of the Retention Time")
+
+Area_bar= ggplot(data_1, aes(x = Ave.Area, y = `Component Name`))+
+  geom_bar(colour="gray", fill="gray", width=.8, stat = "identity") +
+  ggtitle("Average Area") +
+  geom_errorbar(aes(xmin = Ave.Area - STD.Area, xmax = Ave.Area + STD.Area), color = "black")
+
+#width at half height
+Width_bar= ggplot(data_1, aes(x = Ave.PWHH, y = `Component Name`))+
+  geom_bar(colour="gray", fill="gray", width=.8, stat = "identity") +
+  ggtitle("Average of Peak Width at Half Height") +
+  geom_errorbar(aes(xmin = Ave.PWHH - STD.PWHH, xmax = Ave.PWHH + STD.PWHH), color = "black")
+
+print(RT_bar)
+print(Area_bar)
+print(Width_bar)
+```
+
+## Stat: Median CV% of QC parameters
+The median of CV% is calculated and compared with criteria to determine if the system is suitable for continuing with analysis
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+Median_percentCV_RT = c(median(data_1$percentCV.RT))
+Median_percentCV_PWHH = c(median(data_1$percentCV.PWHH))
+Median_percentCV_Area = c(median(data_1$percentCV.Area))
+data_2 = data.frame(Median_percentCV_RT, Median_percentCV_PWHH, Median_percentCV_Area)
+
+data_3 = data_2 %>%
+  rownames_to_column() %>%
+  pivot_longer( cols = -rowname) %>%
+  pivot_wider( names_from = rowname) %>%
+  rename("CV(%)" = 2, "Stat" = 1) %>%
+  as.data.frame()
+
+data_3$`Threshold (%)`= c(5,10,10)
+data_3$`Criteria_Met?`= ifelse(data_3$`Threshold` > data_3$`CV(%)`, "Yes", "No")
+
+kable(data_3)
+```
